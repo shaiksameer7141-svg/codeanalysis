@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Code Learning Assistant — Demo</title>
+  <style>
+    :root{--bg:#0f1724;--panel:#0b1220;--accent:#06b6d4;--muted:#94a3b8;--card:#0b1220}
+    html,body{height:100%;margin:0;font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,'Helvetica Neue',Arial}
+    body{background:linear-gradient(180deg,#071026 0%, #081829 100%);color:#e6eef6}
+    .app{display:grid;grid-template-columns:320px 1fr 380px;gap:18px;padding:18px;height:100vh;box-sizing:border-box}
+    .sidebar{background:rgba(255,255,255,0.02);border-radius:12px;padding:16px;overflow:auto}
+    .panel{background:rgba(255,255,255,0.02);border-radius:12px;padding:12px;height:100%;display:flex;flex-direction:column}
+    h2{margin:4px 0 10px;font-size:18px;color:var(--accent)}
+    .editor-wrap{display:flex;flex-direction:column;height:100%;gap:8px}
+    textarea.code{flex:1;background:#001219;color:#dff3fb;border:none;padding:12px;border-radius:8px;font-family:Menlo,Monaco,Consolas,'Courier New',monospace;font-size:13px;resize:none;line-height:1.4}
+    .controls{display:flex;gap:8px}
+    button{background:var(--accent);border:none;color:#052026;padding:8px 10px;border-radius:8px;cursor:pointer}
+    button.secondary{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted)}
+    .output{background:#031526;padding:12px;border-radius:10px;height:220px;overflow:auto;font-family:Menlo,monospace;font-size:13px}
+    .logs .line{padding:4px 6px;border-bottom:1px dashed rgba(255,255,255,0.02)}
+    .error{color:#ffb4b4}
+    .warn{color:#ffd8a8}
+    .success{color:#b7f5d6}
+    .exercise{padding:8px;border-radius:8px;margin-bottom:8px;background:rgba(255,255,255,0.01)}
+    .tutorial-step{margin-bottom:6px}
+    label{font-size:13px;color:var(--muted)}
+    .suggestions{margin-top:8px}
+    .suggestion{background:rgba(255,255,255,0.01);padding:8px;border-radius:6px;margin-bottom:6px}
+    .small{font-size:12px;color:var(--muted)}
+    .flex{display:flex;gap:8px;align-items:center}
+    .tests{margin-top:8px}
+    .test-pass{color:#8ef0a6}
+    .test-fail{color:#ff9b9b}
+    footer{position:fixed;left:18px;bottom:18px;color:var(--muted);font-size:12px}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <h2>Exercises</h2>
+      <div id="exercises"></div>
+      <button id="generateExercise">Generate Exercise</button>
+      <hr style="margin:12px 0;border:none;border-top:1px solid rgba(255,255,255,0.03)">
+      <h2>Tutorial</h2>
+      <div id="tutorial"></div>
+      <div style="margin-top:auto">
+        <button id="prevStep" class="secondary">Prev</button>
+        <button id="nextStep">Next</button>
+      </div>
+    </aside>
+
+    <main class="panel editor-wrap">
+      <div style="display:flex;gap:12px;align-items:center">
+        <h2>Editor</h2>
+        <div class="small">Language: JavaScript (run in sandbox)</div>
+      </div>
+
+      <textarea id="editor" class="code" spellcheck="false">// Start here: write a function called "sum" that returns a+b
+function sum(a,b){
+  return a + b
+}
+
+console.log(sum(2,3))
+</textarea>
+
+      <div class="controls">
+        <button id="run">Run</button>
+        <button id="analyze" class="secondary">Analyze</button>
+        <button id="suggest" class="secondary">Suggest Fixes</button>
+        <button id="autoFix" class="secondary">Auto-fix: semicolons/braces</button>
+        <button id="test" class="secondary">Run Tests</button>
+        <div style="margin-left:auto" class="small">Sandboxed runtime ✓</div>
+      </div>
+
+      <div class="output">
+        <div class="logs" id="logs"></div>
+      </div>
+    </main>
+
+    <aside class="panel">
+      <h2>Analysis & Suggestions</h2>
+      <div id="analysisArea" class="small">No analysis yet. Click <b>Analyze</b>.</div>
+
+      <h2 style="margin-top:14px">Debug Console</h2>
+      <div id="consoleHints" class="small">Runtime errors map to suggestions here.</div>
+
+      <h2 style="margin-top:14px">Tests</h2>
+      <div id="testsArea" class="tests small">No tests run.</div>
+    </aside>
+  </div>
+
+  <footer>Code Learning Assistant — demo • Edit, run, analyze, and learn</footer>
+
+  <script>
+    // Basic platform logic: editor, sandboxed runner, analyzer, exercise generator, tutorial
+    const editor = document.getElementById('editor');
+    const runBtn = document.getElementById('run');
+    const analyzeBtn = document.getElementById('analyze');
+    const suggestBtn = document.getElementById('suggest');
+    const autoFixBtn = document.getElementById('autoFix');
+    const logs = document.getElementById('logs');
+    const analysisArea = document.getElementById('analysisArea');
+    const consoleHints = document.getElementById('consoleHints');
+    const testBtn = document.getElementById('test');
+    const testsArea = document.getElementById('testsArea');
+    const exercisesDiv = document.getElementById('exercises');
+    const generateExercise = document.getElementById('generateExercise');
+    const tutorialDiv = document.getElementById('tutorial');
+    const nextStepBtn = document.getElementById('nextStep');
+    const prevStepBtn = document.getElementById('prevStep');
+
+    // Simple exercise templates
+    const templates = [
+      {id:1, title:'Sum two numbers', desc:'Write function `sum(a,b)` that returns the sum.', tests:[{input:[2,3],expected:5}]},
+      {id:2, title:'Reverse string', desc:'Write `reverse(s)` returning s reversed.', tests:[{input:['abc'],expected:'cba'}]},
+      {id:3, title:'Factorial', desc:'Implement `fact(n)` returning n! (n>=0).', tests:[{input:[5],expected:120}]},
+      {id:4, title:'Is Prime', desc:'Implement `isPrime(n)` returning true/false.', tests:[{input:[7],expected:true}]}
+    ];
+
+    function renderExercises(){
+      exercisesDiv.innerHTML='';
+      templates.forEach(t=>{
+        const el = document.createElement('div'); el.className='exercise';
+        el.innerHTML = `<b>${t.title}</b><div class=small>${t.desc}</div><button data-id="${t.id}">Load</button>`;
+        el.querySelector('button').addEventListener('click',()=>loadExercise(t.id));
+        exercisesDiv.appendChild(el);
+      });
+    }
+
+    renderExercises();
+
+    function loadExercise(id){
+      const t = templates.find(x=>x.id===id);
+      if(!t) return;
+      editor.value = `// Exercise: ${t.title}\n// ${t.desc}\n\n` + sampleForTemplate(t.id);
+      logs.innerHTML = `<div class="line small">Loaded exercise: <b>${t.title}</b></div>`;
+      testsArea.textContent = `Tests configured: ${t.tests.length}`;
+      // attach tests to current exercise
+      currentExercise = t;
+    }
+
+    function sampleForTemplate(id){
+      switch(id){
+        case 1: return `function sum(a,b){\n  // your code\n}\n\nconsole.log(sum(2,3))`;
+        case 2: return `function reverse(s){\n  // your code\n}\n\nconsole.log(reverse('hello'))`;
+        case 3: return `function fact(n){\n  // your code\n}\n\nconsole.log(fact(5))`;
+        case 4: return `function isPrime(n){\n  // your code\n}\n\nconsole.log(isPrime(7))`;
+        default: return `// new exercise`;
+      }
+    }
+
+    generateExercise.addEventListener('click',()=>{
+      const id = Math.floor(Math.random()*templates.length)+1;
+      loadExercise(id);
+    });
+
+    // Simple tutorial steps
+    const tutorial = [
+      'Welcome! This tutorial will guide you through writing and running code.',
+      'Step 1: Read the exercise on the left and implement the required function.',
+      'Step 2: Click Analyze to detect common issues (missing semicolons, unmatched braces).',
+      'Step 3: Click Run to execute your code in a sandbox — view console and runtime errors.',
+      'Step 4: Run Tests to check your implementation against example cases.',
+      'Tip: Use Suggest Fixes to get targeted hints for failures.'
+    ];
+    let stepIndex = 0;
+    function renderTutorial(){
+      tutorialDiv.innerHTML = `<div class=tutorial-step><b>Step ${stepIndex+1}:</b> ${tutorial[stepIndex]}</div>`;
+    }
+    renderTutorial();
+    nextStepBtn.addEventListener('click',()=>{ if(stepIndex<tutorial.length-1) stepIndex++; renderTutorial(); });
+    prevStepBtn.addEventListener('click',()=>{ if(stepIndex>0) stepIndex--; renderTutorial(); });
+
+    // Sandbox runner via iframe
+    function createSandbox(){
+      const iframe = document.createElement('iframe');
+      iframe.style.display='none';
+      iframe.sandbox = 'allow-scripts';
+      document.body.appendChild(iframe);
+      return iframe;
+    }
+
+    function runCode(code){
+      clearLogs();
+      const iframe = createSandbox();
+      const wrapped = `\nwindow.onerror = function(msg,src,line,col,err){ parent.postMessage({type:'error',message:msg,stack:err && err.stack}, '*'); };\nconsole.log = function(){ parent.postMessage({type:'log',message:Array.from(arguments).join(' ')},'*'); };\n(function(){ try{\n${code}\n}catch(e){ parent.postMessage({type:'error',message:e.message,stack:e.stack}, '*'); } })();\n`;
+      // write to iframe
+      iframe.contentWindow.document.open();
+      iframe.contentWindow.document.write(`<script>${wrapped}</script>`);
+      iframe.contentWindow.document.close();
+      // cleanup after 5s
+      setTimeout(()=>{ try{ iframe.remove(); }catch(e){} }, 5000);
+    }
+
+    window.addEventListener('message', (ev)=>{
+      const d = ev.data;
+      if(!d || !d.type) return;
+      if(d.type==='log') appendLog(d.message);
+      if(d.type==='error') handleRuntimeError(d.message,d.stack);
+    });
+
+    function appendLog(msg){
+      const el = document.createElement('div'); el.className='line'; el.textContent = msg; logs.appendChild(el); logs.scrollTop = logs.scrollHeight;
+    }
+    function appendError(msg){
+      const el = document.createElement('div'); el.className='line error'; el.textContent = msg; logs.appendChild(el); logs.scrollTop = logs.scrollHeight;
+    }
+
+    function handleRuntimeError(message,stack){
+      appendError('Runtime error: ' + message);
+      consoleHints.innerHTML = `<div class=small><b>Hint:</b> ${mapErrorToHint(message)}</div><pre class=small>${stack||''}</pre>`;
+    }
+
+    function clearLogs(){ logs.innerHTML=''; consoleHints.textContent=''; }
+
+    runBtn.addEventListener('click',()=>{
+      runCode(editor.value);
+    });
+
+    // Very simple static analyzer
+    function analyze(code){
+      const results = [];
+      // unmatched braces/parens
+      const stack = [];
+      const pairs = {'(':')','[':']','{':'}'};
+      for(let i=0;i<code.length;i++){
+        const ch = code[i];
+        if('([{'.includes(ch)) stack.push({ch,i});
+        if(')]}'.includes(ch)){
+          if(stack.length===0) results.push({type:'error',msg:`Unmatched closing '${ch}' at ${i}`});
+          else{
+            const last = stack.pop();
+            if(pairs[last.ch] !== ch) results.push({type:'error',msg:`Mismatched ${last.ch} ... ${ch} at ${i}`});
+          }
+        }
+      }
+      if(stack.length) results.push({type:'error',msg:'Unclosed bracket(s) detected.'});
+      // missing semicolons heuristic
+      const lines = code.split('\n');
+      lines.forEach((ln,i)=>{
+        const t = ln.trim();
+        if(t && !t.startsWith('//') && /[^;{}]$/.test(t) && !t.endsWith(')') && !t.startsWith('function') && !t.endsWith('{') && !t.endsWith('}')){
+          results.push({type:'warn',msg:`Possible missing semicolon on line ${i+1}: '${t.slice(0,60)}'`});
+        }
+      });
+      // suspicious patterns
+      if(/==[^=]/.test(code)) results.push({type:'warn',msg:'Found == (loose equality). Prefer === for strict comparison.'});
+      if(/console\.log\([^)]*\)\s*;?/.test(code)) results.push({type:'info',msg:'Console logs present — useful for debugging.'});
+      return results;
+    }
+
+    analyzeBtn.addEventListener('click',()=>{
+      const res = analyze(editor.value);
+      analysisArea.innerHTML = res.map(r=>`<div class=small ${r.type==='error'?"style='color:#ff9b9b'":r.type==='warn'?"style='color:#ffd8a8'":""}>${r.type.toUpperCase()}: ${r.msg}</div>`).join('') || '<div class=small style="color:#8ef0a6">No obvious static issues found.</div>';
+    });
+
+    // Map errors to hints
+    function mapErrorToHint(msg){
+      if(!msg) return 'No message available.';
+      msg = msg.toLowerCase();
+      if(msg.includes('unexpected token')) return 'Syntax error: check for missing brackets, commas or misplaced operators.';
+      if(msg.includes('identifier') && msg.includes('is not defined')) return 'You used a variable or function that has not been declared or loaded — check spelling and scope.';
+      if(msg.includes('cannot read properties')) return 'Likely accessing property of undefined/null — check that value is initialized before use.';
+      if(msg.includes('missing ) after argument list')) return 'Check your function calls and commas in argument lists.';
+      return 'General runtime error — inspect the stack and logs above. Consider adding console.log statements to trace values.';
+    }
+
+    // Suggest fixes (heuristic)
+    suggestBtn.addEventListener('click',()=>{
+      const res = analyze(editor.value);
+      const area = document.createElement('div'); area.className='suggestions';
+      if(res.length===0){ area.innerHTML = '<div class=suggestion>All good — try running the code.</div>'; }
+      else{
+        res.forEach(r=>{
+          const s = document.createElement('div'); s.className='suggestion';
+          s.innerHTML = `<b>${r.type.toUpperCase()}</b>: ${r.msg}<div class=small>Suggestion: ${suggestionForIssue(r)}</div>`;
+          area.appendChild(s);
+        });
+      }
+      analysisArea.innerHTML=''; analysisArea.appendChild(area);
+    });
+
+    function suggestionForIssue(issue){
+      const txt = issue.msg.toLowerCase();
+      if(txt.includes('semicolon')) return 'Add a semicolon at the end of the statement or restructure lines; or run auto-fix.';
+      if(txt.includes('unmatched')||txt.includes('unclosed')) return 'Check matching pairs of (), [] and {}. Use indentation to spot blocks.';
+      if(txt.includes('loose equality')) return 'Replace == with === unless you intentionally want type coercion.';
+      return 'Inspect the code at the indicated location; consider adding console.log debug prints.';
+    }
+
+    // Auto-fix: naive semicolon insertion and closing braces (very conservative)
+    autoFixBtn.addEventListener('click',()=>{
+      const lines = editor.value.split('\n');
+      const fixed = lines.map(l=>{
+        const t = l.trim();
+        if(t && !t.startsWith('//') && !t.endsWith(';') && !t.endsWith('{') && !t.endsWith('}') && !t.endsWith(')')){
+          return l + ';';
+        }
+        return l;
+      }).join('\n');
+      editor.value = fixed;
+      logs.innerHTML = '<div class=line small>Auto-fix applied (naive): semicolons appended where it looked safe.</div>';
+    });
+
+    // Tests runner (very lightweight) - executes tests inside sandbox and captures results
+    let currentExercise = null;
+    testBtn.addEventListener('click',()=>{
+      if(!currentExercise){ testsArea.innerHTML = '<div class=small>Load an exercise first.</div>'; return; }
+      clearLogs();
+      // Construct harness
+      const harness = `\nconst __tests = ${JSON.stringify(currentExercise.tests)};\nconst __results =[];\nfunction __deepEqual(a,b){ return JSON.stringify(a)===JSON.stringify(b);}\ntry{\n${editor.value}\n// attempt to run tests by calling first named function from code
+const fnName = (function(){ const m = (String(${editor.value}).match(/function\s+([a-zA-Z0-9_]+)/)); return m?m[1]:null; })();\nlet fn = null;\nif(fnName && typeof window[fnName] === 'function') fn = window[fnName];
+if(!fn){ // try to guess known names by exercise id
+  if(${currentExercise.id}===1) fn = window['sum'];
+  if(${currentExercise.id}===2) fn = window['reverse'];
+  if(${currentExercise.id}===3) fn = window['fact'];
+  if(${currentExercise.id}===4) fn = window['isPrime'];
+}
+if(!fn) throw new Error('Could not find function to test. Make sure you implement the required function.');
+for(const t of __tests){ try{ const out = fn.apply(null,t.input); __results.push({input:t.input,expected:t.expected,output:out,pass:__deepEqual(out,t.expected)}); }catch(e){ __results.push({input:t.input,expected:t.expected,output:String(e),pass:false}); }}
+parent.postMessage({type:'testrun',results:__results},'*');\n}catch(e){ parent.postMessage({type:'error',message:e.message,stack:e.stack},'*'); }\n`;
+      // run harness
+      const iframe = createSandbox();
+      iframe.contentWindow.document.open();
+      iframe.contentWindow.document.write(`<script>${harness}</script>`);
+      iframe.contentWindow.document.close();
+      setTimeout(()=>{ try{ iframe.remove(); }catch(e){} },5000);
+    });
+
+    window.addEventListener('message',(ev)=>{
+      if(!ev.data) return;
+      if(ev.data.type==='testrun'){
+        const res = ev.data.results;
+        testsArea.innerHTML = '';
+        res.forEach(r=>{
+          const d = document.createElement('div'); d.className='small'; d.innerHTML = `Input: ${JSON.stringify(r.input)} — Output: ${JSON.stringify(r.output)} — Expected: ${JSON.stringify(r.expected)} — <span class='${r.pass?"test-pass":"test-fail"}'>${r.pass?"PASS":"FAIL"}</span>`; testsArea.appendChild(d);
+        });
+      }
+    });
+
+    // initial load
+    loadExercise(1);
+  </script>
+</body>
+</html>
